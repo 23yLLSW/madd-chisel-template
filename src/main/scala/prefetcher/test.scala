@@ -8,8 +8,8 @@ class StridePrefetcher(val tableSize: Int, val prefetchDepth: Int, val prefetchW
     val out = Output(Vec(prefetchWidth, UInt(32.W)))
   })
 
-  val tableAddrBits = log2Ceil(tableSize)
-  val table = Mem(tableSize, Vec(3, UInt(32.W)))
+  val tableAddrBits = log2Ceil(tableSize)//求出tablesize的对数向上取整
+  val table = Mem(tableSize, Vec(3, UInt(32.W)))//创建用于存放步长信息的记忆体
   val tableIdx = io.pc(tableAddrBits - 1, 0)
 
   val strideTable = RegInit(VecInit(Seq.fill(prefetchDepth)(0.U(32.W))))
