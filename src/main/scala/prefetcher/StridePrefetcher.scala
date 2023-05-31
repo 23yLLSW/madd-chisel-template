@@ -1,22 +1,50 @@
-package prefetcher
+package mypackage
 
 import chisel3._
 import chisel3.util._
-import chisel3.stage.{ChiselStage, ChiselGeneratorAnnotation}
 
-// TODO: update this module to implement stride prefetching.
-class StridePrefetcher(M: Int, N: Int) extends Module {
-  val io = IO(new StridePrefetcherIO(M, N))
+class StridePrefetcher(val tableSize: Int, val prefetchDepth: Int, val prefetchWidth: Int) extends Module {
+  val io = IO(new StridePrefetcherIO(tableSize, prefetchDepth, prefetchWidth))
 
-  io.out := DontCare
+  val tableAddrBits = log2Ceil(tableSize)
+  val table = Mem(tableSize, Vec(3, UInt(32.W)))
+  val tableIdx = io.pc(tableAddrBits - 1, 0)
 
-  for (i <- 0 until M) {
-    for (j <- 0 until N) {
-      var sum = 0.S(32.W)
+  val strideTable = RegInit(VecInit(Seq.fill(prefetchDepth)(0.U(32.W))))
+  val stridePtr = RegInit(0.U(log2Ceil(prefetchDepth).W))
 
-      sum = io.a(i * N + j) + io.b(i * N + j)
+  val matchIdx = Wire(UInt(tableAddrBits.W))
+  val matchValid = Wire(Bool())
+  val matchPrevAddress = Wire(UInt(32.W))
+  val matchPrevStride = Wire(UInt(32.W))
 
-      io.out(i * N + j) := sum
+  matchIdx := tableIdx
+  matchValid := false.B
+  matchPrevAddress := 0.U
+  matchPrevStride := 0.U
+
+  for (i <- 0 until tableSize) {
+    val isMatch = table(i)(0) === io.pc && table(i)(1) =/= 0.U && table(i)(2) =/= 0.U
+    when (isMatch && !matchValid) {
+      matchIdx := i.U
+      matchValid := true.B
+      matchPrevAddress := table(i)(1)
+      matchPrevStride := table(i)(2)
     }
+  }
+
+  io.out := VecInit(Seq.tabulate(prefetchWidth)(i => io.in + (i + 1).U * matchPrevStride))
+
+  when (io.in === 0.U) {
+    strideTable(stridePtr) := 0.U
+  } .otherwise {
+    strideTable(stridePtr) := io.in - RegNext(io.in)
+  }
+
+  stridePtr := Mux(stridePtr === (prefetchDepth - 1).U, 0.U, stridePtr + 1.U)
+
+  when (!matchValid || io.in =/= matchPrevAddress + matchPrevStride) {
+    table(matchIdx) := VecInit(Seq(io.pc, io.in, strideTable(stridePtr))))
+    tableIdx := Mux(tableIdx === (tableSize - 1).U, 0.U, tableIdx + 1.U)
   }
 }
